@@ -285,9 +285,31 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   }
 }
 
-class DashboardScreen extends StatelessWidget {
+class DashboardScreen extends StatefulWidget {
   final String username;
   const DashboardScreen({required this.username, super.key});
+
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
+  int consent = 0;
+  bool loading = false;
+  String status = "";
+
+  // You may want to move or reuse your session data collection logic here
+  Future<void> _submitSession() async {
+    setState(() { loading = true; status = ""; });
+    // Call your existing session data collection and upload logic here
+    // For demonstration, we'll just simulate a delay and success
+    await Future.delayed(Duration(seconds: 1));
+    setState(() {
+      status = "Session data submitted!";
+      loading = false;
+    });
+    // In your real app, call the actual _submitSession logic from SessionDataScreen
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -390,7 +412,36 @@ class DashboardScreen extends StatelessWidget {
                 ),
               ),
               SizedBox(height: 16),
-              Text("Welcome, $username", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: canaraBlue)),
+              // Consent & Data Submission Card
+              Card(
+                color: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text("Behavioral Data Consent & Submission", style: TextStyle(fontWeight: FontWeight.bold, color: canaraBlue)),
+                      SwitchListTile(
+                        title: Text('Consent to data collection'),
+                        value: consent == 1,
+                        onChanged: (v) => setState(() => consent = v ? 1 : 0),
+                      ),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: canaraBlue,
+                          foregroundColor: canaraGold,
+                        ),
+                        onPressed: loading ? null : _submitSession,
+                        child: loading ? CircularProgressIndicator() : Text("Submit Session Data"),
+                      ),
+                      if (status.isNotEmpty) Text(status, style: TextStyle(color: Colors.green)),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(height: 16),
+              Text("Welcome, ${widget.username}", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: canaraBlue)),
               SizedBox(height: 16),
               Card(
                 color: canaraBlue,
