@@ -129,6 +129,13 @@ class _LoginScreenState extends State<LoginScreen> {
                         email: username + '@example.com',
                         password: password,
                       );
+                      // Always create/update user doc in Firestore
+                      final user = credential.user;
+                      if (user != null) {
+                        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+                          'username': username,
+                        }, SetOptions(merge: true));
+                      }
                       Provider.of<AuthProvider>(context, listen: false).login(username, credential.user);
                     } catch (e) {
                       setState(() { error = 'Invalid credentials'; });
@@ -203,10 +210,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   if (_formKey.currentState!.validate()) {
                     setState(() { loading = true; error = ""; });
                     try {
-                      await FirebaseAuth.instance.createUserWithEmailAndPassword(
+                      final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
                         email: username + '@example.com',
                         password: password,
                       );
+                      // Always create user doc in Firestore
+                      final user = credential.user;
+                      if (user != null) {
+                        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+                          'username': username,
+                        }, SetOptions(merge: true));
+                      }
                       Navigator.of(context).pop();
                     } catch (e) {
                       setState(() { error = 'Registration failed'; });
@@ -298,17 +312,123 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool loading = false;
   String status = "";
 
-  // You may want to move or reuse your session data collection logic here
+  // Real session data fields
+  String swipeGesture = "";
+  List<List<double>> gyroscopePattern = [];
+  String wifiSsid = "";
+  String wifiBssid = "";
+  double locationLat = 0.0;
+  double locationLon = 0.0;
+  double screenBrightness = -1.0;
+  double volume = -1.0;
+  String sessionStart = "";
+  String sessionEnd = "";
+  String loginTime = "";
+  String timestamp = "";
+  List<int> typingLatencies = [];
+  int? _lastKeyTime;
+  StreamSubscription? _gyroSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _initSession();
+  }
+
+  Future<void> _initSession() async {
+    sessionStart = DateTime.now().toUtc().toIso8601String();
+    loginTime = sessionStart;
+    final loc = Location();
+    bool serviceEnabled = await loc.serviceEnabled();
+    if (!serviceEnabled) serviceEnabled = await loc.requestService();
+    PermissionStatus permission = await loc.hasPermission();
+    if (permission == PermissionStatus.denied) permission = await loc.requestPermission();
+    if (permission == PermissionStatus.granted) {
+      try {
+        final info = NetworkInfo();
+        wifiSsid = (await info.getWifiName()) ?? "";
+        wifiBssid = (await info.getWifiBSSID()) ?? "";
+        if (wifiBssid == "02:00:00:00:00:00") wifiBssid = "";
+        if (wifiSsid.isEmpty || wifiSsid == "<unknown ssid>") wifiSsid = "";
+      } catch (_) {}
+      try {
+        final locData = await loc.getLocation();
+        locationLat = locData.latitude ?? 0.0;
+        locationLon = locData.longitude ?? 0.0;
+      } catch (_) {}
+    }
+    try {
+      screenBrightness = await ScreenBrightness().current ?? -1.0;
+    } catch (_) {}
+    try {
+      volume = await VolumeChannel.getMediaVolume();
+    } catch (_) {}
+    _gyroSub = gyroscopeEvents.listen((event) {
+      gyroscopePattern.add([event.x, event.y, event.z]);
+    });
+    setState(() {});
+  }
+
+  void _endSession() {
+    sessionEnd = DateTime.now().toUtc().toIso8601String();
+    _gyroSub?.cancel();
+  }
+
+  void _onSwipe(String direction) {
+    setState(() {
+      swipeGesture = direction;
+    });
+  }
+
+  void _onTextChanged(String value) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (_lastKeyTime != null) {
+      typingLatencies.add(now - _lastKeyTime!);
+    }
+    _lastKeyTime = now;
+  }
+
   Future<void> _submitSession() async {
     setState(() { loading = true; status = ""; });
-    // Call your existing session data collection and upload logic here
-    // For demonstration, we'll just simulate a delay and success
-    await Future.delayed(Duration(seconds: 1));
+    _endSession();
+    timestamp = DateTime.now().toUtc().toIso8601String();
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() { status = "User not logged in"; loading = false; });
+      return;
+    }
+    final sessionData = {
+      'session_start': sessionStart,
+      'session_end': sessionEnd,
+      'swipe_gesture': swipeGesture,
+      'gyroscope_pattern': gyroscopePattern
+          .map((e) => {'x': e[0], 'y': e[1], 'z': e[2]})
+          .toList(),
+      'wifi_ssid': wifiSsid,
+      'wifi_bssid': wifiBssid,
+      'location': [locationLat, locationLon],
+      'login_time': loginTime,
+      'screen_brightness': screenBrightness,
+      'volume': volume,
+      'consent': consent,
+      'timestamp': timestamp,
+      'typing_speed': typingLatencies.isNotEmpty
+          ? typingLatencies.reduce((a, b) => a + b) / typingLatencies.length
+          : null,
+    };
+    final userDoc = FirebaseFirestore.instance.collection('users').doc(user.uid);
+    await userDoc.set({'username': widget.username}, SetOptions(merge: true));
+    await userDoc.collection('sessions').add(sessionData);
     setState(() {
       status = "Session data submitted!";
       loading = false;
     });
-    // In your real app, call the actual _submitSession logic from SessionDataScreen
+  }
+
+  @override
+  void dispose() {
+    _gyroSub?.cancel();
+    super.dispose();
   }
 
   @override
